@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Verify OTP - Barclay</title>
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        :root { --barclay-blue: #00AEEF; --barclay-dark: #003C64; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg,#f5f7fa 0%,#c3cfe2 100%); min-height: 100vh; padding: 20px; }
+        .otp-container { max-width: 500px; margin: 3rem auto; }
+        .otp-card { background: white; border-radius: 20px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); padding: 3rem; text-align: center; }
+        .otp-logo { width: 120px; margin-bottom: 2rem; }
+        .otp-title { color: var(--barclay-dark); font-size: 2rem; font-weight: 700; margin-bottom: 1rem; }
+        .email-display { color: var(--barclay-blue); font-weight: 600; font-size: 1.1rem; margin-bottom: 2rem; word-break: break-all; }
+        .otp-inputs { display: flex; justify-content: center; gap: 15px; margin: 2rem 0; }
+        .otp-input { width: 55px; height: 65px; text-align: center; font-size: 1.8rem; font-weight: bold; border: 2px solid #e1e5eb; border-radius: 10px; transition: all 0.3s; }
+        .otp-input:focus { border-color: var(--barclay-blue); box-shadow: 0 0 0 0.25rem rgba(0,174,239,0.25); outline: none; }
+        .timer { color: #666; font-size: 1rem; margin: 1.5rem 0; }
+        .timer.expired { color: #dc3545; font-weight: bold; }
+        .auth-btn { background: linear-gradient(135deg,var(--barclay-blue) 0%,var(--barclay-dark) 100%); color:white; border:none; border-radius:10px; padding:14px 40px; font-size:1.1rem; font-weight:600; transition: transform 0.3s, box-shadow 0.3s; margin:10px; }
+        .auth-btn:hover { transform: translateY(-2px); box-shadow:0 7px 14px rgba(0,174,239,0.3); }
+        .auth-btn:disabled { opacity:0.5; cursor:not-allowed; }
+        .btn-secondary { background:#f8f9fa; color:var(--barclay-dark); border:2px solid var(--barclay-dark); }
+        .error-message { color:#dc3545; margin:1rem 0; min-height:24px; }
+        .success-message { color:#198754; margin:1rem 0; }
+        .loading-spinner { display:inline-block; width:20px; height:20px; border:3px solid #f3f3f3; border-top:3px solid var(--barclay-blue); border-radius:50%; animation:spin 1s linear infinite; margin-right:10px; }
+        @keyframes spin { 0% { transform:rotate(0deg); } 100% { transform:rotate(360deg); } }
+        @media (max-width:576px) { .otp-card { padding:2rem 1.5rem; } .otp-input { width:45px; height:55px; font-size:1.5rem; } .otp-inputs { gap:10px; } }
+    </style>
+</head>
+<body>
+<div class="otp-container">
+    <div class="otp-card">
+        <img src="assets/vendor/favicon_io/favicon-32x32.png" alt="Barclay Logo" class="otp-logo">
+        <h1 class="otp-title">Verify Your Email</h1>
+        <p class="email-display" id="userEmail"></p>
+        <p style="color:#555;margin-bottom:1rem;">We've sent a 6-digit verification code to your email address. Please enter it below to continue.</p>
+        <div class="otp-inputs">
+            <input type="text" maxlength="1" class="otp-input" data-index="1">
+            <input type="text" maxlength="1" class="otp-input" data-index="2">
+            <input type="text" maxlength="1" class="otp-input" data-index="3">
+            <input type="text" maxlength="1" class="otp-input" data-index="4">
+            <input type="text" maxlength="1" class="otp-input" data-index="5">
+            <input type="text" maxlength="1" class="otp-input" data-index="6">
+        </div>
+        <div class="timer" id="timer">Code expires in: 05:00</div>
+        <div class="error-message" id="errorMessage"></div>
+        <div class="success-message" id="successMessage"></div>
+        <div>
+            <button class="auth-btn" id="verifyBtn" disabled>Verify OTP</button>
+            <button class="auth-btn btn-secondary" id="resendBtn" disabled>Resend (<span id="resendCountdown">30</span>s)</button>
+        </div>
+        <div style="margin-top:2rem;">
+            <a href="account.html" class="text-decoration-none" style="color: var(--barclay-blue);"><i class="fas fa-arrow-left"></i> Back to Login</a>
+        </div>
+    </div>
+</div>
+
+<!-- Bootstrap JS -->
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<!-- Firebase SDK -->
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword, updateProfile } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
+import { getFirestore, doc, getDoc, setDoc, updateDoc, serverTimestamp, deleteDoc, increment } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+
+const firebaseConfig = {
+    apiKey: "AIzaSyD6RIYTsP-F3UhKR5Zuu6F-ok1RTHShEQs",
+    authDomain: "barclays-cc823.firebaseapp.com",
+    projectId: "barclays-cc823",
+    storageBucket: "barclays-cc823.firebasestorage.app",
+    messagingSenderId: "770942938167",
+    appId: "1:770942938167:web:1cde1cbfd35bd4084e63b2",
+    measurementId: "G-BZ8YJ3YQ93"
+};
+
+const app = initializeApp(firebaseConfig);
+const auth = getAuth(app);
+const db = getFirestore(app);
+
+// URL params
+const urlParams = new URLSearchParams(window.location.search);
+const email = decodeURIComponent(urlParams.get('email') || '');
+const type = urlParams.get('type') || 'signup';
+
+// SessionStorage data
+const registrationData = JSON.parse(sessionStorage.getItem('pendingRegistration') || '{}');
+const loginData = JSON.parse(sessionStorage.getItem('pendingLogin') || '{}');
+
+// DOM
+const userEmailElement = document.getElementById('userEmail');
+const otpInputs = document.querySelectorAll('.otp-input');
+const timerElement = document.getElementById('timer');
+const errorElement = document.getElementById('errorMessage');
+const successElement = document.getElementById('successMessage');
+const verifyBtn = document.getElementById('verifyBtn');
+const resendBtn = document.getElementById('resendBtn');
+const resendCountdownElement = document.getElementById('resendCountdown');
+
+let otpTimer, resendTimer;
+let timeLeft = 300; // 5 minutes
+let resendTime = 30; // 30s
+
+if(email){
+    userEmailElement.textContent = email;
+    setupOTPInputs();
+    startOTPTimer();
+    startResendTimer();
+} else {
+    errorElement.textContent = 'No email provided. Please go back and try again.';
+    verifyBtn.disabled = true;
+}
+
+// ======== Functions ========
+
+function setupOTPInputs(){
+    otpInputs.forEach((input, index) => {
+        input.value = '';
+        input.addEventListener('input', e => {
+            const value = e.target.value;
+            if(!/^\d*$/.test(value)){ e.target.value=value.replace(/\D/g,''); return; }
+            if(value.length===1 && index<otpInputs.length-1) otpInputs[index+1].focus();
+            const allFilled = Array.from(otpInputs).every(inp => inp.value.length===1);
+            verifyBtn.disabled = !allFilled;
+        });
+        input.addEventListener('keydown', e => {
+            if(e.key==='Backspace' && !e.target.value && index>0) otpInputs[index-1].focus();
+        });
+    });
+    otpInputs[0].focus();
+}
+
+function getOTPCode(){ return Array.from(otpInputs).map(inp=>inp.value).join(''); }
+
+function startOTPTimer(){
+    clearInterval(otpTimer);
+    timeLeft = 300;
+    timerElement.classList.remove('expired');
+
+    otpTimer = setInterval(() => {
+        const minutes = Math.floor(timeLeft/60).toString().padStart(2,'0');
+        const seconds = (timeLeft%60).toString().padStart(2,'0');
+        timerElement.textContent = `Code expires in: ${minutes}:${seconds}`;
+
+        if(timeLeft <= 0){
+            clearInterval(otpTimer);
+            timerElement.textContent = 'Code has expired';
+            timerElement.classList.add('expired');
+            verifyBtn.disabled = true;
+        }
+        timeLeft--;
+    },1000);
+}
+
+function startResendTimer(){
+    clearInterval(resendTimer);
+    resendTime = 30;
+    resendBtn.disabled = true;
+    resendCountdownElement.textContent = resendTime;
+
+    resendTimer = setInterval(() => {
+        resendTime--;
+        resendCountdownElement.textContent = resendTime;
+        if(resendTime <= 0){
+            clearInterval(resendTimer);
+            resendBtn.disabled = false;
+            resendBtn.textContent = 'Resend Code';
+        }
+    },1000);
+}
+
+// ======== OTP Verification ========
+verifyBtn.addEventListener('click', async () => {
+    const enteredOTP = getOTPCode();
+    if(enteredOTP.length !== 6){ errorElement.textContent='Please enter all 6 digits'; return; }
+
+    verifyBtn.innerHTML = '<span class="loading-spinner"></span> Verifying...';
+    verifyBtn.disabled = true;
+    errorElement.textContent = '';
+
+    try{
+        let otpId = type==='signup'? registrationData.otpId : loginData.otpId;
+        if(!otpId) throw new Error('OTP session not found. Please start over.');
+
+        const otpDocRef = doc(db,'otpCodes',otpId);
+        let otpDoc = await getDoc(otpDocRef);
+        if(!otpDoc.exists()) throw new Error('OTP expired or not found. Please request a new one.');
+
+        const otpData = otpDoc.data();
+        const attempts = otpData.attempts || 0;
+
+        // Set default expiresAt if missing
+        if(!otpData.expiresAt) await updateDoc(otpDocRef,{ expiresAt: serverTimestamp() });
+
+        const expiryTime = otpData.expiresAt.seconds ? new Date(otpData.expiresAt.seconds*1000) : new Date(otpData.expiresAt);
+        if(new Date() > expiryTime){
+            await updateDoc(otpDocRef,{ used:true });
+            throw new Error('Verification code has expired. Please request a new one.');
+        }
+
+        if(otpData.otpCode !== enteredOTP){
+            await updateDoc(otpDocRef,{ attempts: increment(1) });
+            const remaining = 2 - attempts;
+            throw new Error(`Incorrect code. ${remaining} attempt(s) remaining.`);
+        }
+
+        // ✅ Correct OTP
+        await updateDoc(otpDocRef,{ used:true, verified:true, verifiedAt: serverTimestamp() });
+        successElement.textContent='✓ Email verified successfully!';
+
+        // Proceed with signup or login
+        if(type==='signup'){
+            if(!registrationData.password) throw new Error('Password missing. Please register again.');
+            const userCredential = await createUserWithEmailAndPassword(auth,email,registrationData.password);
+            const user = userCredential.user;
+            await updateProfile(user,{ displayName:`${registrationData.firstName} ${registrationData.lastName}` });
+            await setDoc(doc(db,'users',user.uid),{
+                uid:user.uid,
+                email:email,
+                firstName:registrationData.firstName,
+                lastName:registrationData.lastName,
+                fullName:`${registrationData.firstName} ${registrationData.lastName}`,
+                createdAt:serverTimestamp(),
+                emailVerified:true,
+                lastLogin:serverTimestamp(),
+                accountType:'personal',
+                status:'active'
+            });
+            await deleteDoc(otpDocRef);
+            sessionStorage.removeItem('pendingRegistration');
+            window.location.href='index.html?welcome=true';
+        } else {
+            if(!loginData.password) throw new Error('Password missing. Please login again.');
+            const userCredential = await signInWithEmailAndPassword(auth,email,loginData.password);
+            const user = userCredential.user;
+            await setDoc(doc(db,'users',user.uid),{
+                lastLogin:serverTimestamp(),
+                emailVerified:true
+            },{ merge:true });
+            await deleteDoc(otpDocRef);
+            sessionStorage.removeItem('pendingLogin');
+            window.location.href='index.html';
+        }
+
+    } catch(err){
+        errorElement.textContent = err.message;
+        verifyBtn.disabled = false;
+        verifyBtn.innerHTML = 'Verify OTP';
+    }
+});
+
+resendBtn.addEventListener('click',()=>{ window.location.href='account.html'; });
+document.addEventListener('keydown',(e)=>{ if(e.key==='Enter' && !verifyBtn.disabled) verifyBtn.click(); });
+console.log('OTP Verification System Fully Initialized');
+</script>
+</body>
+</html>
